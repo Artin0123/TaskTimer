@@ -1,6 +1,6 @@
 > English version: [README_EN.md](README_EN.md)
 
-贊助我製作Android版本（需要25美元上架費）：  
+贊助我製作Android版本（需要上架費）：  
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/arttin)  
 
@@ -21,7 +21,6 @@
 - 固定時長倒數與循環使用
 	- 支援秒 / 分 / 時 / 天，快速輸入 1～99 並選擇單位。
 	- 顯示目標時間與剩餘時間，到時彈出提醒。
-	- 到時後任務仍保留，按一下「重設」即可開始下一輪（實務上可無限循環使用）。
 - 通知體驗
 	- 內建應用內輕量氣泡通知，可自訂顯示座標；點擊可直接開啟編輯。
 	- 可選擇啟用 Windows 原生通知（winotify）。
@@ -57,11 +56,8 @@ python TaskTimer.py
 	- 直跑 .py：與 `TaskTimer.py` 同資料夾。
 	- 打包 .exe：與 .exe 同資料夾。
 
-## 使用說明
+## 設定
 
-- 新增任務 → 輸入「數值 + 單位」→ 儲存。
-- 開始/暫停：互不影響其他任務。
-- 重設：直接將下一輪目標時間設為「現在 + 時長」。
 - 通知：
 	- 一定會有應用視窗提醒；
 	- 若啟用「系統通知」，同時會顯示 Windows 通知。
@@ -69,4 +65,6 @@ python TaskTimer.py
 - 托盤：安裝可選依賴後，程式可縮到系統托盤常駐；未安裝則改為最小化。
 
 ## 特別感謝
-GPT、Cluade、Gemini
+- Cursor
+- Github Copilot
+- [CustomTkinter](https://customtkinter.tomschimansky.com/)

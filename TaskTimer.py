@@ -13,10 +13,57 @@ import customtkinter as ctk
 from winotify import Notification, audio
 import threading
 import ctypes
+import locale as _py_locale
 
 APP_NAME = "TaskTimer"
 
-# 在打包(exe)與直跑(py)時使用不同基準路徑
+# --- i18n setup ---
+_I18N: dict = {}
+_LANG = "zh-TW"
+
+
+def _load_locale(lang: str):
+    """Load locale file into _I18N and set _LANG."""
+    global _I18N, _LANG
+    try:
+        lang = ("en" if (lang or "").lower().startswith("en") else "zh-TW")
+    except Exception:
+        lang = "zh-TW"
+    try:
+        base = Path(__file__).resolve().parent
+        if getattr(sys, "frozen", False):
+            base = Path(sys.executable).resolve().parent
+        path = base / "locales" / ("en.json" if lang == "en" else "zh-TW.json")
+        _I18N = json.loads(path.read_text("utf-8"))
+        _LANG = lang
+    except Exception:
+        _I18N = {}
+        _LANG = "zh-TW"
+
+
+def t(key: str, **kwargs) -> str:
+    s = _I18N.get(key, key)
+    if kwargs:
+        try:
+            s = s.format(**kwargs)
+        except Exception:
+            pass
+    return s
+
+
+def unit_label(symbol: str) -> str:
+    # symbol in [D,H,M,S]
+    if _LANG == "en":
+        return {"D": "D", "H": "H", "M": "M", "S": "S"}.get(symbol, symbol)
+    return {"D": "天", "H": "時", "M": "分", "S": "秒"}.get(symbol, symbol)
+
+
+def unit_seconds_from_display(display: str) -> int:
+    mapping = {unit_label("S"): 1, unit_label("M"): 60,
+               unit_label("H"): 3600, unit_label("D"): 86400}
+    mapping.update({"S": 1, "M": 60, "H": 3600, "D": 86400})
+    return mapping.get(display, 1)
+
 
 def _app_base_dir() -> Path:
     # PyInstaller 打包時會有 sys.frozen 屬性
@@ -24,9 +71,10 @@ def _app_base_dir() -> Path:
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
 
-DATA_DIR = Path.home() / APP_NAME
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-TASK_FILE = DATA_DIR / "tasks.json"
+
+# 任務資料與設定檔改存放於應用程式同目錄（py 或 exe 同層）
+APP_DIR = _app_base_dir()
+TASK_FILE = APP_DIR / "tasks.json"
 # 設定檔：
 # - 直跑 .py：與 TaskTimer.py 同資料夾 TaskTimer.json
 # - 打包 .exe：與 .exe 同資料夾 TaskTimer.json
@@ -36,17 +84,19 @@ else:
     SETTINGS_FILE = Path(__file__).resolve().with_suffix(".json")
 
 # 視窗尺寸與時間單位常數
-MAIN_WINDOW_WIDTH = 800
+MAIN_WINDOW_WIDTH = 720
 MAIN_WINDOW_HEIGHT = 400
 TOAST_WINDOW_WIDTH = 360
 TOAST_WINDOW_HEIGHT = 100
 
+# Internal unit table by symbol; display via unit_label()
 TIME_UNITS = [
-    ("秒", 1),
-    ("分", 60),
-    ("時", 3600),
-    ("天", 86400),
+    ("S", 1),
+    ("M", 60),
+    ("H", 3600),
+    ("D", 86400),
 ]
+
 
 def win_toast(title: str, message: str) -> bool:
     # 系統通知，僅顯示
@@ -57,6 +107,7 @@ def win_toast(title: str, message: str) -> bool:
         return True
     except Exception:
         return False
+
 
 @dataclass
 class Task:
@@ -83,17 +134,20 @@ class Task:
             description=str(d.get("description", "")),
         )
 
+
 def format_seconds(s: int) -> str:
     s = max(0, int(s))
     d, rem = divmod(s, 86400)
     h, rem = divmod(rem, 3600)
     m, s = divmod(rem, 60)
-    units = [("天", d), ("時", h), ("分", m), ("秒", s)]
-    nonzero = [(name, val) for name, val in units if val]
+    pairs = [(unit_label("D"), d), (unit_label("H"), h),
+             (unit_label("M"), m), (unit_label("S"), s)]
+    nonzero = [(label, val) for label, val in pairs if val]
     if not nonzero:
-        return "0秒"
+        return f"0{unit_label('S')}"
     top2 = nonzero[:2]
-    return " ".join(f"{val}{name}" for name, val in top2)
+    return " ".join(f"{val}{label}" for label, val in top2)
+
 
 class TaskRow(ctk.CTkFrame):
     def __init__(self, master, task: Task, on_action):
@@ -104,7 +158,7 @@ class TaskRow(ctk.CTkFrame):
         # 佈局欄寬
         # 固定各欄最小寬度，確保文字對齊
         self.grid_columnconfigure(0, weight=0, minsize=160)  # 名稱固定寬
-        self.grid_columnconfigure(1, weight=0, minsize=300)  # 目標
+        self.grid_columnconfigure(1, weight=0, minsize=280)  # 目標
         self.grid_columnconfigure(2, weight=0, minsize=60)  # 狀態
         self.grid_columnconfigure(3, weight=1)               # 按鈕區彈性
 
@@ -132,16 +186,14 @@ class TaskRow(ctk.CTkFrame):
         # 按鈕列
         btns = ctk.CTkFrame(self)
         btns.grid(row=0, column=3, sticky="e")
-        ctk.CTkButton(btns, text="開始", width=48, font=font_normal, command=lambda: self.on_action(
+        ctk.CTkButton(btns, text=t("BTN_START"), width=48, font=font_normal, command=lambda: self.on_action(
             "start", task.id)).pack(side="left", padx=2)
-        ctk.CTkButton(btns, text="暫停", width=48, font=font_normal, command=lambda: self.on_action(
+        ctk.CTkButton(btns, text=t("BTN_STOP"), width=48, font=font_normal, command=lambda: self.on_action(
             "stop", task.id)).pack(side="left", padx=2)
-        ctk.CTkButton(btns, text="重設", width=48, font=font_normal, command=lambda: self.on_action(
-            "reset", task.id)).pack(side="left", padx=2)
-        ctk.CTkButton(btns, text="編輯", width=48, font=font_normal, command=lambda: self.on_action(
+        ctk.CTkButton(btns, text=t("BTN_EDIT"), width=48, font=font_normal, command=lambda: self.on_action(
             "edit", task.id)).pack(side="left", padx=2)
-        ctk.CTkButton(btns, text="刪除", width=48, font=font_normal, fg_color="#b3261e", command=lambda: self.on_action(
-            "delete", task.id)).pack(side="left", padx=2)
+        ctk.CTkButton(btns, text=t("BTN_DELETE"), width=48, font=font_normal, fg_color="#b3261e", command=lambda: self.on_action(
+            "delete", task.id)).pack(side="left", padx=(2, 4))
 
     def _info_text(self, task: Task) -> str:
         parts: list[str] = []
@@ -150,15 +202,15 @@ class TaskRow(ctk.CTkFrame):
                          time.localtime(task.due_at)))
             if task.is_running:
                 remain = max(0, int(task.due_at) - int(time.time()))
-                parts.append(f"剩餘 {format_seconds(remain)}")
+                parts.append(t("FORMAT_REMAIN", text=format_seconds(remain)))
         else:
-            parts.append("目標：未排程")
+            parts.append(t("LBL_GOAL_UNSCHEDULED"))
         return " ".join([p for p in parts if p])
 
     def _state_text(self, task: Task) -> str:
         if task.due_at and int(time.time()) > int(task.due_at):
-            return "超過目標時間"
-        return ("進行中" if task.is_running else "已暫停")
+            return t("LBL_OVERDUE")
+        return (t("LBL_RUNNING") if task.is_running else t("LBL_PAUSED"))
 
     def refresh(self, task: Task):
         self.task = task
@@ -166,21 +218,30 @@ class TaskRow(ctk.CTkFrame):
         self.info_lbl.configure(text=self._info_text(task))
         self.state_lbl.configure(text=self._state_text(task))
 
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title(APP_NAME)
+        # Load settings early to setup language and theme
+        self.settings = self._load_settings()
+        try:
+            loc = (_py_locale.getlocale() or (None, None))[0]
+            default_lang = "en" if (
+                (loc or "").lower().startswith("en")) else "zh-TW"
+        except Exception:
+            default_lang = "zh-TW"
+        _load_locale(self.settings.get("lang") or default_lang)
+        self.title(t("APP_TITLE"))
 
         try:
-            # 最小尺寸固定為800x400
-            self.minsize(800, 400)
+            # 最小尺寸固定為720x400
+            self.minsize(720, 400)
         except Exception:
             pass
 
         self.geometry(f"{MAIN_WINDOW_WIDTH}x{MAIN_WINDOW_HEIGHT}")
 
-        # 先載入設定，以便初始化主題
-        self.settings = self._load_settings()
+    # 以設定初始化主題
         ctk.set_appearance_mode(self.settings.get("theme", "System"))
         ctk.set_default_color_theme("blue")
 
@@ -227,15 +288,16 @@ class App(ctk.CTk):
         # 補發過期的目標時間通知（若未通知）
         now = int(time.time())
         changed = False
-        for t in self.tasks:
-            if t.due_at and (not t.notified) and now >= t.due_at:
+        for task in self.tasks:
+            if task.due_at and (not task.notified) and now >= task.due_at:
                 # 一定顯示應用通知；系統通知視設定而定
                 self._show_in_app_toast(
-                    "時間到", f"{t.name} 已到目標時間（點擊開啟編輯）", t.id)
+                    t("TOAST_TIMEUP_TITLE"), t("TOAST_TIMEUP_MSG", name=task.name), task.id)
                 if bool(self.settings.get("enable_system_notification", True)):
-                    win_toast("時間到", f"{t.name} 已到目標時間")
-                t.notified = True
-                t.is_running = False
+                    win_toast(t("TOAST_TIMEUP_TITLE"), t(
+                        "TOAST_TIMEUP_MSG", name=task.name))
+                task.notified = True
+                task.is_running = False
                 changed = True
         if changed:
             save_tasks(self.tasks)
@@ -314,14 +376,31 @@ class App(ctk.CTk):
         toolbar = ctk.CTkFrame(self)
         toolbar.pack(fill="x", padx=8, pady=8)
 
-        ctk.CTkButton(toolbar, text="新增", width=64, font=self.font_normal,
+        ctk.CTkButton(toolbar, text=t("BTN_ADD"), width=64, font=self.font_normal,
                       command=self.on_add_task).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(toolbar, text="設定", width=64, font=self.font_normal,
+        ctk.CTkButton(toolbar, text=t("BTN_SETTINGS"), width=64, font=self.font_normal,
                       command=self.open_settings_overlay).pack(side="left")
-        ctk.CTkButton(toolbar, text="匯出", width=64, font=self.font_normal, command=self.on_export).pack(
+        ctk.CTkButton(toolbar, text=t("BTN_EXPORT"), width=64, font=self.font_normal, command=self.on_export).pack(
             side="left", padx=(8, 0))
-        ctk.CTkButton(toolbar, text="匯入", width=64, font=self.font_normal, command=self.on_import).pack(
+        ctk.CTkButton(toolbar, text=t("BTN_IMPORT"), width=64, font=self.font_normal, command=self.on_import).pack(
             side="left", padx=(8, 0))
+
+    # Language toggle (ENG/中文)
+        def _toggle_lang():
+            new_lang = "en" if _LANG != "en" else "zh-TW"
+            _load_locale(new_lang)
+            self.settings["lang"] = new_lang
+            self._save_settings()
+            # Recreate UI to apply text changes
+            self.title(t("APP_TITLE"))
+            for w in list(self.winfo_children()):
+                try:
+                    w.destroy()
+                except Exception:
+                    pass
+            self._build_ui()
+        ctk.CTkButton(toolbar, text=t("BTN_TOGGLE_LANG"), width=64, font=self.font_normal,
+                      command=_toggle_lang).pack(side="left", padx=(8, 0))
 
         # 主內容容器（可在列表 / 編輯間切換）
         self.content = ctk.CTkFrame(self)
@@ -362,10 +441,7 @@ class App(ctk.CTk):
                     self.preferred_font = font_name
                     break
 
-            print(f"最終選擇的字體是: {self.preferred_font}")
-
         except Exception as e:
-            print(f"尋找字體時發生錯誤: {e}")
             self.preferred_font = "TkDefaultFont"
 
     def _get_screen_info_and_scaling(self):
@@ -487,8 +563,9 @@ class App(ctk.CTk):
         # 標題列
         header = ctk.CTkFrame(container)
         header.pack(fill="x", padx=12, pady=(12, 0))
-        ctk.CTkLabel(header, text="設定", font=self.font_large).pack(side="left")
-        ctk.CTkButton(header, text="關閉", width=64, font=self.font_normal,
+        ctk.CTkLabel(header, text=t("LBL_SETTINGS"),
+                     font=self.font_large).pack(side="left")
+        ctk.CTkButton(header, text=t("BTN_BACK"), width=64, font=self.font_normal,
                       command=self.close_settings_overlay).pack(side="right")
 
         body = ctk.CTkFrame(container)
@@ -502,12 +579,12 @@ class App(ctk.CTk):
             self.settings["enable_system_notification"] = bool(
                 sys_ntf_var.get())
             self._save_settings()
-        ctk.CTkCheckBox(body, text="啟用系統通知（純顯示）", font=self.font_normal,
+        ctk.CTkCheckBox(body, text=t("LBL_ENABLE_SYS_NOTIFY"), font=self.font_normal,
                         variable=sys_ntf_var, command=_on_sys_ntf_toggle).grid(
             row=1, column=0, columnspan=2, sticky="w", pady=(0, 6))
 
         # 應用通知位置
-        ctk.CTkLabel(body, text="應用通知 X 座標", font=self.font_normal).grid(
+        ctk.CTkLabel(body, text=t("LBL_TOAST_X"), font=self.font_normal).grid(
             row=2, column=0, sticky="w")
         toast_x_var = tk.StringVar(value=str(self.settings.get("toast_x", "")))
         toast_x_entry = ctk.CTkEntry(
@@ -525,7 +602,7 @@ class App(ctk.CTk):
         toast_x_var.trace_add("write", _sanitize_x)
         toast_x_entry.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=6)
 
-        ctk.CTkLabel(body, text="應用通知 Y 座標", font=self.font_normal).grid(
+        ctk.CTkLabel(body, text=t("LBL_TOAST_Y"), font=self.font_normal).grid(
             row=3, column=0, sticky="w")
         toast_y_var = tk.StringVar(value=str(self.settings.get("toast_y", "")))
         toast_y_entry = ctk.CTkEntry(
@@ -551,18 +628,18 @@ class App(ctk.CTk):
                 return (v == "") or (re.fullmatch(r"-?\d{1,6}", v) is not None)
             if not _ok(x_txt) or not _ok(y_txt):
                 messagebox.showwarning(
-                    "座標輸入無效",
+                    t("LBL_INVALID_COORD"),
                 )
                 return
             self.settings["toast_x"] = x_txt
             self.settings["toast_y"] = y_txt
             self._save_settings()
 
-        ctk.CTkButton(body, text="儲存位置", command=_save_toast_pos,
+        ctk.CTkButton(body, text=t("BTN_SAVE"), command=_save_toast_pos,
                       width=120, font=self.font_normal).grid(row=4, column=1, sticky="e")
 
         # 顏色模式
-        ctk.CTkLabel(body, text="主題", font=self.font_normal).grid(
+        ctk.CTkLabel(body, text=t("LBL_THEME"), font=self.font_normal).grid(
             row=5, column=0, sticky="w")
         theme_var = tk.StringVar(value=ctk.get_appearance_mode())
         theme_menu = ctk.CTkOptionMenu(
@@ -576,16 +653,16 @@ class App(ctk.CTk):
         theme_menu.grid(row=5, column=1, sticky="w", padx=(8, 0), pady=6)
 
         # 開機自啟動
-        ctk.CTkLabel(body, text="開機自啟動", font=self.font_normal).grid(
+        ctk.CTkLabel(body, text=t("LBL_STARTUP"), font=self.font_normal).grid(
             row=6, column=0, sticky="w")
         startup_frame = ctk.CTkFrame(body)
         startup_frame.grid(row=6, column=1, sticky="w", padx=(8, 0), pady=6)
 
-        self.enable_btn = ctk.CTkButton(startup_frame, text="啟用", width=80, font=self.font_normal,
+        self.enable_btn = ctk.CTkButton(startup_frame, text=t("BTN_ENABLE"), width=80, font=self.font_normal,
                                         command=lambda: self._set_startup(True))
         self.enable_btn.pack(side="left", padx=(0, 4))
 
-        self.disable_btn = ctk.CTkButton(startup_frame, text="停用", width=80, font=self.font_normal,
+        self.disable_btn = ctk.CTkButton(startup_frame, text=t("BTN_DISABLE"), width=80, font=self.font_normal,
                                          command=lambda: self._set_startup(False))
         self.disable_btn.pack(side="left")
 
@@ -602,7 +679,7 @@ class App(ctk.CTk):
 
         ctk.CTkCheckBox(
             body,
-            text="啟動時最小化至托盤",
+            text=t("LBL_MINIMIZE_TO_TRAY"),
             font=self.font_normal,
             variable=start_min_var,
             command=_on_toggle_start_min,
@@ -616,8 +693,8 @@ class App(ctk.CTk):
 
         self._edit_task_id = task_id
         self._is_new_task = is_new
-        t = next((x for x in self.tasks if x.id == task_id), None)
-        if not t:
+        task = next((x for x in self.tasks if x.id == task_id), None)
+        if not task:
             return
 
         # 隱藏列表，顯示全幅編輯容器
@@ -633,7 +710,8 @@ class App(ctk.CTk):
         # 標題列（透明，移除深色背景條）
         header = ctk.CTkFrame(container, fg_color="transparent")
         header.pack(fill="x", padx=12, pady=(12, 0))
-        title_text = "新增任務" if is_new else f"編輯任務：{t.name}"
+        title_text = (
+            t("BTN_ADD") if is_new else f"{t('BTN_EDIT')}：{task.name}")
         ctk.CTkLabel(header, text=title_text,
                      font=self.font_large).pack(side="left")
 
@@ -641,11 +719,11 @@ class App(ctk.CTk):
         body.pack(fill="both", expand=True, padx=12, pady=12)
 
         # 任務基本資訊（名稱、時間設定）
-        form = ctk.CTkFrame(body)
-        form.pack(fill="x", pady=(0, 8))
-        ctk.CTkLabel(form, text="名稱", font=self.font_normal).grid(
+        form = ctk.CTkFrame(body, corner_radius=0)
+        form.pack(fill="x")
+        ctk.CTkLabel(form, text=t("LBL_NAME"), font=self.font_normal).grid(
             row=0, column=0, sticky="w")
-        name_var = tk.StringVar(value=t.name)
+        name_var = tk.StringVar(value=task.name)
         name_entry = ctk.CTkEntry(
             form, textvariable=name_var, width=140, font=self.font_normal)
         name_entry.grid(row=0, column=1, sticky="w", padx=(8, 0), pady=6)
@@ -662,7 +740,7 @@ class App(ctk.CTk):
             name_var.trace('w', _limit_name)
 
         # 時間輸入「數值 + 單位」
-        ctk.CTkLabel(form, text="數值", font=self.font_normal).grid(
+        ctk.CTkLabel(form, text=t("LBL_VALUE"), font=self.font_normal).grid(
             row=1, column=0, sticky="w")
         val_var = tk.StringVar(value="")
         val_entry = ctk.CTkEntry(
@@ -680,10 +758,10 @@ class App(ctk.CTk):
         except Exception:
             pass
 
-        unit_var2 = tk.StringVar(value="秒")
+        unit_var2 = tk.StringVar(value=unit_label("S"))
         unit_menu2 = ctk.CTkOptionMenu(
             form,
-            values=[u for u, _ in TIME_UNITS],
+            values=[unit_label(sym) for sym, _ in TIME_UNITS],
             variable=unit_var2,
             width=80,
             font=self.font_normal,
@@ -693,15 +771,15 @@ class App(ctk.CTk):
 
         # 根據當前秒數自動選擇合適單位（讓值落在 1..99 內）
         try:
-            secs_val = max(1, int(t.seconds))
+            secs_val = max(1, int(task.seconds))
         except Exception:
             secs_val = 1
-        best_unit_name = "秒"
+        best_unit_name = unit_label("S")
         best_value = secs_val
-        for name, sec_per in reversed(TIME_UNITS):
+        for sym, sec_per in reversed(TIME_UNITS):
             v = secs_val // sec_per
             if 1 <= v <= 99:
-                best_unit_name = name
+                best_unit_name = unit_label(sym)
                 best_value = v
                 break
         unit_var2.set(best_unit_name)
@@ -709,19 +787,18 @@ class App(ctk.CTk):
         val_entry.insert(0, str(best_value))
 
         # 說明（純文字渲染）
-        desc_frame = ctk.CTkFrame(body)
+        desc_frame = ctk.CTkFrame(body, corner_radius=0)
         desc_frame.pack(fill="both", expand=True)
 
-        # 說明標題列（透明，移除深色背景條）
+        # 說明標題列
         desc_header = ctk.CTkFrame(desc_frame, fg_color="transparent")
-        desc_header.pack(fill="x", pady=(0, 4))
-        ctk.CTkLabel(desc_header, text="說明", font=self.font_normal).pack(
-            side="left", anchor="w")
-
+        desc_header.pack(fill="x", pady=(8, 4))
+        ctk.CTkLabel(desc_header, text=t("LBL_DESC"),
+                     font=self.font_normal).pack(side="left", anchor="w")
         toggle_var = tk.BooleanVar(value=False)  # False=檢視, True=編輯
 
         editor = ctk.CTkTextbox(desc_frame, font=self.font_large)  # 編輯框也使用大字體
-        editor.insert("1.0", t.description or "")
+        editor.insert("1.0", task.description or "")
 
         # 使用標準 tk.Text 作為預覽
         is_dark_mode = ctk.get_appearance_mode() == "Dark"
@@ -747,7 +824,7 @@ class App(ctk.CTk):
             viewer.delete("1.0", "end")
             viewer.configure(cursor="arrow")
             if not markdown_text:
-                viewer.insert("1.0", "(無內容)")
+                viewer.insert("1.0", t("LBL_EMPTY"))
             else:
                 viewer.insert("1.0", markdown_text)
                 url_pattern = r'https?://[^\s<>"]+'
@@ -801,54 +878,120 @@ class App(ctk.CTk):
         def _toggle_edit():
             if toggle_var.get():
                 toggle_var.set(False)
-                t.description = editor.get("1.0", "end-1c")
+                task.description = editor.get("1.0", "end-1c")
                 editor.pack_forget()
                 viewer.pack(fill="both", expand=True, pady=(4, 8))
                 _render_preview()
-                toggle_btn.configure(text="編輯")
+                toggle_btn.configure(text=t("BTN_EDIT"))
+                # 完成後只儲存描述，不自動重設時間
+                try:
+                    save_tasks(self.tasks)
+                except Exception:
+                    pass
+                # 如列表有顯示描述摘要可刷新，現僅刷新狀態列
+                self.refresh_rows(full=False)
             else:
                 toggle_var.set(True)
                 viewer.pack_forget()
                 editor.pack(fill="both", expand=True, pady=(4, 8))
-                toggle_btn.configure(text="完成")
+                toggle_btn.configure(text=t("BTN_SAVE"))
 
-        toggle_btn = ctk.CTkButton(
-            desc_header, text="編輯", width=64, font=self.font_normal, command=_toggle_edit)
+        toggle_btn = ctk.CTkButton(desc_header, text=t(
+            "BTN_EDIT"), width=64, font=self.font_normal, command=_toggle_edit)
         toggle_btn.pack(side="right")
 
-        save_btn_text = "新增" if is_new else "儲存"
+        save_btn_text = (t("BTN_ADD") if is_new else t("BTN_SAVE"))
         ctk.CTkButton(
             header,
             text=save_btn_text,
             width=64,
             font=self.font_normal,
             command=lambda: self._save_task_inline_unit(
-                t,
+                task,
                 name_var.get(),
                 val_entry.get(),
                 unit_var2.get(),
                 is_new,
             ),
         ).pack(side="right", padx=(8, 0))
-        ctk.CTkButton(header, text="返回", width=64, font=self.font_normal,
-                      command=lambda: self._close_edit_overlay(is_new, t.id)).pack(side="right")
 
+        # 編輯頁面的重設按鈕（帶確認對話框）
+        def _confirm_and_reset():
+            try:
+                ok = messagebox.askyesno(
+                    t("BTN_RESET"), t("DLG_CONFIRM_RESET"))
+            except Exception:
+                ok = True  # 若對話框失敗，退而求其次直接重設
+            if not ok:
+                return
+            try:
+                task.is_running = False
+                task.due_at = int(time.time()) + max(1, int(task.seconds or 1))
+                task.notified = False
+                save_tasks(self.tasks)  # 僅更新任務資料，不變更設定檔
+                self.refresh_rows(full=False)
+            except Exception:
+                pass
+
+        ctk.CTkButton(
+            header,
+            text=t("BTN_RESET"),
+            width=64,
+            font=self.font_normal,
+            command=_confirm_and_reset,
+        ).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(
+            header,
+            text=t("BTN_BACK"),
+            width=64,
+            font=self.font_normal,
+            command=lambda: self._close_edit_overlay(is_new, task.id),
+        ).pack(side="right")
         viewer.pack(fill="both", expand=True, pady=(4, 8))
         _render_preview()
 
-    def _save_task_inline_unit(self, t: Task, name: str, value_text: str, unit_name: str, is_new: bool = False):
-        t.name = (name or "未命名").strip()[:8]  # 確保名稱不超過8字
+    def _save_task_inline_unit(self, task: Task, name: str, value_text: str, unit_name: str, is_new: bool = False):
+        # 收集變更但先不套用
+        new_name = (name or "未命名").strip()[:8]
         try:
             v = int(value_text)
         except Exception:
             v = 1
         v = max(1, min(99, v))
-        unit = next((sec for n, sec in TIME_UNITS if n == unit_name), 1)
-        sec = max(1, v * unit)
-        t.seconds = sec
-        t.due_at = int(time.time()) + sec
-        t.remaining = sec
-        t.notified = False
+        unit = unit_seconds_from_display(unit_name)
+        new_sec = max(1, v * unit)
+
+        old_sec = int(task.seconds or 0)
+        sec_changed = (new_sec != old_sec)
+
+        # 如時間有變更，先詢問是否要更新目標時間
+        if sec_changed:
+            try:
+                ok = messagebox.askyesno(
+                    t("BTN_SAVE"), t("DLG_CONFIRM_UPDATE_TIME"))
+            except Exception:
+                ok = True
+            if not ok:
+                return  # 取消：不儲存、不關閉編輯頁
+
+        # 確認或未變更時間：開始套用變更
+        task.name = new_name
+        task.seconds = new_sec
+
+        now_ts = int(time.time())
+        if is_new:
+            # 新增任務：建立新的目標時間並清除通知狀態
+            task.due_at = now_ts + new_sec
+            task.remaining = new_sec
+            task.notified = False
+        else:
+            # 既有任務：只有在秒數有變更時才更新目標時間，並保持不自動開始
+            if sec_changed:
+                task.due_at = now_ts + new_sec
+                task.remaining = new_sec
+                task.notified = False
+                task.is_running = False
+
         save_tasks(self.tasks)
 
         # 儲存後自動回到任務列表
@@ -886,7 +1029,7 @@ class App(ctk.CTk):
     def _close_edit_overlay(self, is_new: bool = False, task_id: str = None):
         # 如果是新增模式且取消，則刪除剛創建的任務
         if is_new and task_id:
-            self.tasks = [t for t in self.tasks if t.id != task_id]
+            self.tasks = [task for task in self.tasks if task.id != task_id]
         self.close_edit_overlay()
 
     def close_edit_overlay(self):
@@ -922,39 +1065,36 @@ class App(ctk.CTk):
             for child in list(self.scroll.children.values()):
                 child.destroy()
             self.row_widgets.clear()
-            for t in self.tasks:
-                row = TaskRow(self.scroll, t, self.on_row_action)
+            for task in self.tasks:
+                row = TaskRow(self.scroll, task, self.on_row_action)
                 row.pack(fill="x", padx=4, pady=4)
-                self.row_widgets[t.id] = row
+                self.row_widgets[task.id] = row
         else:
-            for t in self.tasks:
-                if t.id in self.row_widgets:
-                    self.row_widgets[t.id].refresh(t)
+            for task in self.tasks:
+                if task.id in self.row_widgets:
+                    self.row_widgets[task.id].refresh(task)
 
     def on_row_action(self, action: str, task_id: str):
-        idx = next((i for i, t in enumerate(
-            self.tasks) if t.id == task_id), -1)
+        idx = next((i for i, task in enumerate(
+            self.tasks) if task.id == task_id), -1)
         if idx < 0:
             return
-        t = self.tasks[idx]
+        task = self.tasks[idx]
 
         if action == "start":
             # 若超過目標時間則不可開始
-            if t.due_at and int(time.time()) >= int(t.due_at):
+            if task.due_at and int(time.time()) >= int(task.due_at):
                 pass
             else:
-                t.is_running = True
-                if not t.due_at:
-                    t.due_at = int(time.time()) + t.seconds
-                    t.notified = False
+                task.is_running = True
+                if not task.due_at:
+                    task.due_at = int(time.time()) + task.seconds
+                    task.notified = False
 
         elif action == "stop":
-            t.is_running = False
+            task.is_running = False
 
-        elif action == "reset":
-            t.is_running = False
-            t.due_at = int(time.time()) + t.seconds
-            t.notified = False
+    # 'reset' 動作已移至編輯頁處理
         elif action == "delete":
 
             self.tasks.pop(idx)
@@ -973,7 +1113,7 @@ class App(ctk.CTk):
         # 創建一個空任務用於新增
         new_task = Task(
             id=str(time.time_ns()),
-            name="新任務",
+            name=t("NEW_TASK"),
             seconds=300,  # 預設5分鐘
             remaining=300,
             due_at=None,
@@ -988,19 +1128,21 @@ class App(ctk.CTk):
 
     def _on_tick(self):
         changed = False
-        for t in self.tasks:
-            if t.is_running and t.due_at:
-                if int(time.time()) >= int(t.due_at) and not t.notified:
-                    t.is_running = False
-                    t.notified = True
+        for task in self.tasks:
+            if task.is_running and task.due_at:
+                if int(time.time()) >= int(task.due_at) and not task.notified:
+                    task.is_running = False
+                    task.notified = True
                     # 一定顯示應用通知；系統通知視設定而定
                     self._show_in_app_toast(
-                        "時間到", f"{t.name} 已到目標時間（點擊開啟編輯）", t.id)
+                        t("TOAST_TIMEUP_TITLE"), t("TOAST_TIMEUP_MSG", name=task.name), task.id)
                     if bool(self.settings.get("enable_system_notification", True)):
-                        win_toast("時間到", f"{t.name} 已到目標時間")
+                        win_toast(t("TOAST_TIMEUP_TITLE"), t(
+                            "TOAST_TIMEUP_MSG", name=task.name))
                     changed = True
         # 若有任務在目標模式且正在跑，就刷新 UI
-        any_running_goal = any(t.is_running and t.due_at for t in self.tasks)
+        any_running_goal = any(
+            task.is_running and task.due_at for task in self.tasks)
         if changed:
             save_tasks(self.tasks)
             self.refresh_rows(full=False)
@@ -1041,19 +1183,20 @@ class App(ctk.CTk):
             initialfile="tasks-export.json",
             defaultextension=".json",
             filetypes=[("JSON Files", "*.json")],
-            title="匯出任務到…",
+            title=t("BTN_EXPORT"),
         )
         if not path:
             return
         try:
             Path(path).write_text(
-                json.dumps([asdict(t) for t in self.tasks],
+                json.dumps([asdict(task) for task in self.tasks],
                            ensure_ascii=False, indent=2),
                 "utf-8",
             )
-            messagebox.showinfo("匯出成功", f"已匯出到：{path}")
+            messagebox.showinfo(t("DLG_EXPORT_SUCCESS"),
+                                t("MSG_EXPORTED_TO", path=path))
         except Exception as e:
-            messagebox.showwarning("匯出失敗", str(e))
+            messagebox.showwarning(t("DLG_EXPORT_FAIL"), str(e))
 
     def on_import(self):
         initial_dir = str(_app_base_dir())
@@ -1061,7 +1204,7 @@ class App(ctk.CTk):
             initialdir=initial_dir,
             defaultextension=".json",
             filetypes=[("JSON Files", "*.json")],
-            title="匯入任務…",
+            title=t("BTN_IMPORT"),
         )
         if not path:
             return
@@ -1070,9 +1213,10 @@ class App(ctk.CTk):
             self.tasks = [Task.from_dict(x) for x in data]
             save_tasks(self.tasks)
             self.refresh_rows(full=True)
-            messagebox.showinfo("匯入成功", f"已匯入：{path}")
+            messagebox.showinfo(t("DLG_IMPORT_SUCCESS"),
+                                t("MSG_IMPORTED_FROM", path=path))
         except Exception as e:
-            messagebox.showwarning("匯入失敗", str(e))
+            messagebox.showwarning(t("DLG_IMPORT_FAIL"), str(e))
 
     # --- 系統托盤整合 ---
     def _ensure_tray_libs(self) -> bool:
@@ -1124,8 +1268,8 @@ class App(ctk.CTk):
 
         img = self._make_tray_image()
         menu = self._pystray.Menu(
-            self._pystray.MenuItem("顯示主視窗", _on_show),
-            self._pystray.MenuItem("結束", _on_exit)
+            self._pystray.MenuItem(t("MENU_SHOW"), _on_show),
+            self._pystray.MenuItem(t("MENU_EXIT"), _on_exit)
         )
         self._tray_icon = self._pystray.Icon(APP_NAME, img, APP_NAME, menu)
         # 以背景執行，不阻塞 Tk 主迴圈
@@ -1179,6 +1323,7 @@ class App(ctk.CTk):
         self._show_tray()
         # 可選：提醒一次
 
+
 def load_tasks() -> list[Task]:
     if TASK_FILE.exists():
         try:
@@ -1187,6 +1332,7 @@ def load_tasks() -> list[Task]:
         except Exception:
             return []
     return []
+
 
 def save_tasks(tasks: list[Task]):
     try:
@@ -1198,14 +1344,18 @@ def save_tasks(tasks: list[Task]):
     except Exception:
         pass
 
+
 def _startup_dir() -> Path:
     return Path(os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"))
+
 
 def get_startup_shortcut_path() -> Path:
     return _startup_dir() / "TaskTimer.lnk"
 
+
 def is_startup_enabled() -> bool:
     return get_startup_shortcut_path().exists()
+
 
 def create_startup_shortcut():
     from win32com.client import Dispatch  # type: ignore
@@ -1233,6 +1383,7 @@ def create_startup_shortcut():
     shortcut.IconLocation = str(icon_path)
     shortcut.save()
 
+
 def remove_startup_shortcut():
     p = get_startup_shortcut_path()
     if p.exists():
@@ -1243,20 +1394,7 @@ def remove_startup_shortcut():
             os.chmod(p, 0o666)
             p.unlink()
 
-if __name__ == "__main__":
-    # 支援從通知按下動作後直接開啟某任務的編輯覆蓋視窗
-    target_task_id: str | None = None
-    try:
-        if "--edit-task" in sys.argv:
-            i = sys.argv.index("--edit-task")
-            if i + 1 < len(sys.argv):
-                target_task_id = sys.argv[i + 1]
-    except Exception:
-        target_task_id = None
 
+if __name__ == "__main__":
     app = App()
-    if target_task_id:
-        # 等待主視窗渲染後先喚起再開啟
-        app.after(200, lambda: (app.show_and_focus(),
-                  app.open_edit_overlay(target_task_id)))
     app.mainloop()

@@ -1,4 +1,4 @@
-Sponsor me to make an Android version (needs $25 listing fee):  
+Sponsor me to make an Android version (needs listing fee):  
 
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/arttin)  
 
@@ -19,7 +19,6 @@ Use a fixed duration to remind you, not a specific calendar datetime. Set a dura
 - Duration-based countdown and reuse
   - Supports seconds / minutes / hours / days, quick input 1–99 with unit
   - Shows target time and remaining time, notifies when due
-  - After due, the task remains; click “Reset” to start the next round (effectively infinite reuse)
 - Notifications
   - Built-in in-app lightweight toast, configurable position; click to open edit
   - Optional Windows native notifications (winotify)
@@ -55,11 +54,8 @@ Notes:
   - Running .py from source: placed next to `TaskTimer.py`.
   - Packed .exe: placed next to the .exe.
 
-## Usage
+## Settings
 
-- Add a task → input “value + unit” → Save.
-- Start/Pause: independent across tasks.
-- Reset: sets next target to “now + duration”.
 - Notifications:
   - In-app toast always appears;
   - If “system notifications” is enabled, a Windows notification also shows.
@@ -67,4 +63,6 @@ Notes:
 - System tray: with the optional dependencies installed, the app can minimize to the system tray; otherwise it falls back to normal minimize.
 
 ## Special Thanks
-GPT, Claude, Gemini
+- Cursor
+- Github Copilot
+- [CustomTkinter](https://customtkinter.tomschimansky.com/)

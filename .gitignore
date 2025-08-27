@@ -1,5 +1,8 @@
+__pycache__
 .venv
 .vscode
-build/
-dist/
+build
+dist
+tasks.json
+TaskTimer.json
 TaskTimer.spec
