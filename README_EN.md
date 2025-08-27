@@ -1,3 +1,9 @@
+Sponsor me to make an Android version (needs $25 listing fee):  
+
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/arttin)  
+
+[![ko-fi](https://www.ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/U7U01KBWBU)  
+
 # TaskTimer — Duration-based recurring reminders
 
 Use a fixed duration to remind you, not a specific calendar datetime. Set a duration (e.g., 7 days, 30 days) and reuse it for subscriptions/bills/routine tasks. When it’s due, click Reset to start the next round.
@@ -59,3 +65,6 @@ Notes:
   - If “system notifications” is enabled, a Windows notification also shows.
 - Run at startup: enable/disable in Settings (implemented via a shortcut in the Startup folder).
 - System tray: with the optional dependencies installed, the app can minimize to the system tray; otherwise it falls back to normal minimize.
+
+## Special Thanks
+GPT, Claude, Gemini

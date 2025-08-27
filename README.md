@@ -1,5 +1,11 @@
 > English version: [README_EN.md](README_EN.md)
 
+贊助我製作Android版本（需要25美元上架費）：  
+
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/arttin)  
+
+[![ko-fi](https://www.ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/U7U01KBWBU)  
+
 # TaskTimer — 固定時長循環提醒器
 
 用固定「時長」來提醒，而不是指定某年某月某日。你只要設定一個時長（像是 7 天、30 天），就能反覆用於訂閱/帳單/例行工作等周期性任務，時間到之後一鍵重設即可進入下一輪。
